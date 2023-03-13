@@ -40,7 +40,7 @@ router.post('/', async (req, res) => {
   });
 
   await saveMessage(userMessage);
-  await saveConvo({ ...userMessage, model, chatGptLabel, promptPrefix });
+  await saveConvo(req?.session?.user?.username, { ...userMessage, model, chatGptLabel, promptPrefix });
   sendMessage(res, { message: userMessage, created: true });
 
   try {
@@ -96,7 +96,7 @@ router.post('/', async (req, res) => {
       (links?.length > 0 && hasCitations ? `\n<small>${links}</small>` : '');
 
     await saveMessage(response);
-    await saveConvo(response);
+    await saveConvo(req?.session?.user?.username, response);
     sendMessage(res, {
       title: await getConvoTitle(conversationId),
       final: true, 

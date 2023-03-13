@@ -7,13 +7,13 @@ const { getMessages } = require('../../models/Message');
 
 router.get('/', async (req, res) => {
   const pageNumber = req.query.pageNumber || 1;
-  res.status(200).send(await getConvos(pageNumber));
+  res.status(200).send(await getConvos(req?.session?.user?.username, pageNumber));
 });
 
 router.post('/gen_title', async (req, res) => {
   const { conversationId } = req.body.arg;
 
-  const convo = await getConvo(conversationId)
+  const convo = await getConvo(req?.session?.user?.username, conversationId)
   const firstMessage = (await getMessages({ conversationId }))[0]
   const secondMessage = (await getMessages({ conversationId }))[1]
 
@@ -25,10 +25,12 @@ router.post('/gen_title', async (req, res) => {
         response: JSON.stringify(secondMessage?.text || '')
       });
 
-  await saveConvo({
+  await saveConvo(req?.session?.user?.username,
+    {
     conversationId,
     title
-  })
+    }
+  )
 
   res.status(200).send(title);
 });
@@ -41,7 +43,7 @@ router.post('/clear', async (req, res) => {
   }
 
   try {
-    const dbResponse = await deleteConvos(filter);
+    const dbResponse = await deleteConvos(req?.session?.user?.username, filter);
     res.status(201).send(dbResponse);
   } catch (error) {
     console.error(error);
@@ -53,7 +55,7 @@ router.post('/update', async (req, res) => {
   const update = req.body.arg;
 
   try {
-    const dbResponse = await updateConvo(update);
+    const dbResponse = await updateConvo(req?.session?.user?.username, update);
     res.status(201).send(dbResponse);
   } catch (error) {
     console.error(error);

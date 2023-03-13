@@ -41,7 +41,7 @@ router.post('/', async (req, res) => {
   });
 
   await saveMessage(userMessage);
-  await saveConvo({ ...userMessage, model, chatGptLabel, promptPrefix });
+  await saveConvo(req?.session?.user?.username, { ...userMessage, model, chatGptLabel, promptPrefix });
   sendMessage(res, { message: userMessage, created: true });
 
   try {
@@ -74,7 +74,7 @@ router.post('/', async (req, res) => {
     response.parentMessageId = response.messageId;
     response.invocationId = convo.invocationId ? convo.invocationId + 1 : 1;
     response.title = convo.jailbreakConversationId
-      ? await getConvoTitle(conversationId)
+      ? await getConvoTitle(req?.session?.user?.username, convo.conversationId)
       : await titleConvo({
           model,
           message: text,
@@ -106,7 +106,7 @@ router.post('/', async (req, res) => {
 
     // Save sydney response & convo, then send
     await saveMessage(response);
-    await saveConvo(response);
+    await saveConvo(req?.session?.user?.username,response);
     sendMessage(res, {
       title: await getConvoTitle(conversationId),
       final: true, 

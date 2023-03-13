@@ -53,7 +53,7 @@ router.post('/', async (req, res) => {
   }
 
   if (model === 'chatgptCustom' && !chatGptLabel && conversationId) {
-    const convo = await getConvo({ conversationId });
+    const convo = await getConvo(req?.session?.user?.username, conversationId);
     if (convo) {
       console.log('found convo for custom gpt', { convo })
       chatGptLabel = convo.chatGptLabel;
@@ -70,7 +70,7 @@ router.post('/', async (req, res) => {
   });
 
   await saveMessage(userMessage);
-  await saveConvo({ ...userMessage, model, chatGptLabel, promptPrefix });
+  await saveConvo(req?.session?.user?.username, { ...userMessage, model, chatGptLabel, promptPrefix });
   sendMessage(res, { message: userMessage, created: true });
 
   try {
@@ -154,7 +154,7 @@ router.post('/', async (req, res) => {
     }
 
     await saveMessage(gptResponse);
-    await saveConvo(gptResponse);
+    await saveConvo(req?.session?.user?.username, gptResponse);
     sendMessage(res, {
       title: await getConvoTitle(conversationId),
       final: true, 
