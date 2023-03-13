@@ -27,7 +27,7 @@ export default function TextChat({ messages }) {
 
   const messageHandler = (data, currentState, currentMsg) => {
     const { messages, _currentMsg, message, sender } = currentState;
-    dispatch(setMessages([...messages, currentMsg, { sender, text: data }]));
+    dispatch(setMessages([...messages, currentMsg, { sender, text: data, parentMessageId: currentMsg?.messageId, messageId: currentMsg?.messageId + '_' }]));
   };
 
   const createdHandler = (data, currentState, currentMsg) => {
@@ -145,11 +145,13 @@ export default function TextChat({ messages }) {
       return;
     }
 
+    // this is not a real messageId, it is used as placeholder before real messageId returned
+    const fakeMessageId = crypto.randomUUID();
     const isCustomModel = model === 'chatgptCustom' || !initial[model];
     const message = text.trim();
-    const currentMsg = { sender: 'User', text: message, current: true, isCreatedByUser: true };
+    const currentMsg = { sender: 'User', text: message, current: true, isCreatedByUser: true, parentMessageId: convo.parentMessageId || '00000000-0000-0000-0000-000000000000', messageId: fakeMessageId };
     const sender = model === 'chatgptCustom' ? chatGptLabel : model;
-    const initialResponse = { sender, text: '' };
+    const initialResponse = { sender, text: '', parentMessageId: fakeMessageId };
 
     dispatch(setSubmitState(true));
     dispatch(setMessages([...messages, currentMsg, initialResponse]));
@@ -159,9 +161,7 @@ export default function TextChat({ messages }) {
       convo,
       isCustomModel,
       message: { 
-        sender: 'User',
-        text: message, 
-        isCreatedByUser: true,
+        ...currentMsg,
         model,
         chatGptLabel,
         promptPrefix,
@@ -186,7 +186,7 @@ export default function TextChat({ messages }) {
         payload = {
           ...payload,
           conversationId: convo.conversationId,
-          parentMessageId: convo.parentMessageId
+          parentMessageId: convo.parentMessageId || '00000000-0000-0000-0000-000000000000'
         };
       }
 
