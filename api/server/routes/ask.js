@@ -10,26 +10,34 @@ const {
   customClient,
   detectCode
 } = require('../../app/');
-const { getConvo, saveMessage, deleteMessages, saveConvo } = require('../../models');
+const { getConvo, saveMessage, getConvoTitle, saveConvo } = require('../../models');
 const { handleError, sendMessage } = require('./handlers');
 
 router.use('/bing', askBing);
 router.use('/sydney', askSydney);
 
 router.post('/', async (req, res) => {
-  let { model, text, parentMessageId, conversationId, chatGptLabel, promptPrefix } = req.body;
+  let { model, text, parentMessageId, conversationId: oldConversationId , chatGptLabel, promptPrefix } = req.body;
   if (text.length === 0) {
     return handleError(res, 'Prompt empty or too short');
   }
 
+  const conversationId = oldConversationId || crypto.randomUUID();
+
   const userMessageId = crypto.randomUUID();
-  let userMessage = { id: userMessageId, sender: 'User', text };
+  const userParentMessageId = parentMessageId || '00000000-0000-0000-0000-000000000000'
+  let userMessage = {
+     messageId: userMessageId, 
+     sender: 'User', 
+     text, 
+     parentMessageId: userParentMessageId,
+     conversationId, 
+     isCreatedByUser: true 
+  };
 
   console.log('ask log', {
     model,
     ...userMessage,
-    parentMessageId,
-    conversationId,
     chatGptLabel,
     promptPrefix
   });
@@ -45,7 +53,7 @@ router.post('/', async (req, res) => {
   }
 
   if (model === 'chatgptCustom' && !chatGptLabel && conversationId) {
-    const convo = await getConvo({ conversationId });
+    const convo = await getConvo(req?.session?.user?.username, conversationId);
     if (convo) {
       console.log('found convo for custom gpt', { convo })
       chatGptLabel = convo.chatGptLabel;
@@ -61,12 +69,15 @@ router.post('/', async (req, res) => {
     'X-Accel-Buffering': 'no'
   });
 
+  await saveMessage(userMessage);
+  await saveConvo(req?.session?.user?.username, { ...userMessage, model, chatGptLabel, promptPrefix });
+  sendMessage(res, { message: userMessage, created: true });
+
   try {
     let i = 0;
     let tokens = '';
     const progressCallback = async (partial) => {
       if (i === 0 && typeof partial === 'object') {
-        userMessage.parentMessageId = parentMessageId ? parentMessageId : partial.id;
         userMessage.conversationId = conversationId ? conversationId : partial.conversationId;
         await saveMessage(userMessage);
         sendMessage(res, { ...partial, initial: true });
@@ -95,7 +106,7 @@ router.post('/', async (req, res) => {
       text,
       progressCallback,
       convo: {
-        parentMessageId,
+        parentMessageId: userParentMessageId,
         conversationId
       },
       chatGptLabel,
@@ -106,9 +117,8 @@ router.post('/', async (req, res) => {
 
     if (!gptResponse.parentMessageId) {
       gptResponse.text = gptResponse.response;
-      gptResponse.id = gptResponse.messageId;
-      gptResponse.parentMessageId = gptResponse.messageId;
-      userMessage.parentMessageId = parentMessageId ? parentMessageId : gptResponse.messageId;
+      // gptResponse.id = gptResponse.messageId;
+      gptResponse.parentMessageId = userMessage.messageId;
       userMessage.conversationId = conversationId
         ? conversationId
         : gptResponse.conversationId;
@@ -124,15 +134,15 @@ router.post('/', async (req, res) => {
       return handleError(res, 'Prompt empty or too short');
     }
 
-    if (!parentMessageId) {
-      gptResponse.title = await titleConvo({
-        model,
-        message: text,
-        response: JSON.stringify(gptResponse.text)
-      });
-    }
+    // if (!parentMessageId) {
+    //   gptResponse.title = await titleConvo({
+    //     model,
+    //     message: text,
+    //     response: JSON.stringify(gptResponse.text)
+    //   });
+    // }
     gptResponse.sender = model === 'chatgptCustom' ? chatGptLabel : model;
-    gptResponse.final = true;
+    // gptResponse.final = true;
     gptResponse.text = await detectCode(gptResponse.text);
 
     if (chatGptLabel?.length > 0 && model === 'chatgptCustom') {
@@ -144,12 +154,17 @@ router.post('/', async (req, res) => {
     }
 
     await saveMessage(gptResponse);
-    await saveConvo(gptResponse);
-    sendMessage(res, gptResponse);
+    await saveConvo(req?.session?.user?.username, gptResponse);
+    sendMessage(res, {
+      title: await getConvoTitle(conversationId),
+      final: true, 
+      requestMessage: userMessage, 
+      responseMessage: gptResponse
+    });
     res.end();
   } catch (error) {
     console.log(error);
-    await deleteMessages({ id: userMessageId });
+    // await deleteMessages({ messageId: userMessageId });
     handleError(res, error.message);
   }
 });
