@@ -1,48 +1,48 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 const { getMessages, deleteMessages } = require('./Message');
 
-const convoSchema = mongoose.Schema({
-  conversationId: {
-    type: String,
-    unique: true,
-    required: true
+const convoSchema = mongoose.Schema(
+  {
+    conversationId: {
+      type: String,
+      unique: true,
+      required: true
+    },
+    parentMessageId: {
+      type: String,
+      required: true
+    },
+    title: {
+      type: String,
+      default: 'New Chat'
+    },
+    jailbreakConversationId: {
+      type: String
+    },
+    conversationSignature: {
+      type: String
+    },
+    clientId: {
+      type: String
+    },
+    invocationId: {
+      type: String
+    },
+    chatGptLabel: {
+      type: String
+    },
+    promptPrefix: {
+      type: String
+    },
+    model: {
+      type: String
+    },
+    suggestions: [{ type: String }],
+    messages: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Message' }]
   },
-  parentMessageId: {
-    type: String,
-    required: true
-  },
-  title: {
-    type: String,
-    default: 'New conversation'
-  },
-  jailbreakConversationId: {
-    type: String
-  },
-  conversationSignature: {
-    type: String
-  },
-  clientId: {
-    type: String
-  },
-  invocationId: {
-    type: String
-  },
-  chatGptLabel: {
-    type: String
-  },
-  promptPrefix: {
-    type: String
-  },
-  model: {
-    type: String
-  },
-  suggestions: [{ type: String }],
-  messages: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Message' }],
-  created: {
-    type: Date,
-    default: Date.now
-  }
-});
+  { timestamps: true }
+);
 
 const Conversation =
   mongoose.models.Conversation || mongoose.model('Conversation', convoSchema);
@@ -57,13 +57,18 @@ const getConvo = async (conversationId) => {
 };
 
 module.exports = {
-  saveConvo: async ({ conversationId, title, ...convo }) => {
+  saveConvo: async ({ conversationId, newConversationId, title, ...convo }) => {
     try {
       const messages = await getMessages({ conversationId });
       const update = { ...convo, messages };
       if (title) {
         update.title = title;
       }
+      if (newConversationId) {
+        update.conversationId = newConversationId;
+      }
+      if (!update.jailbreakConversationId)
+        update.jailbreakConversationId = null
 
       return await Conversation.findOneAndUpdate(
         { conversationId },
@@ -85,20 +90,18 @@ module.exports = {
       return { message: 'Error updating conversation' };
     }
   },
-  // getConvos: async () => await Conversation.find({}).sort({ created: -1 }).exec(),
-  getConvos: async (pageNumber = 1, pageSize = 12) => {
+  // getConvos: async () => await Conversation.find({}).sort({ createdAt: -1 }).exec(),
+  getConvosByPage: async (pageNumber = 1, pageSize = 12) => {
     try {
-      const skip = (pageNumber - 1) * pageSize;
-      // const limit = pageNumber * pageSize;
-
-      const conversations = await Conversation.find({})
-        .sort({ created: -1 })
-        .skip(skip)
-        // .limit(limit)
+      const totalConvos = (await Conversation.countDocuments()) || 1;
+      const totalPages = Math.ceil(totalConvos / pageSize);
+      const convos = await Conversation.find()
+        .sort({ createdAt: -1, created: -1 })
+        .skip((pageNumber - 1) * pageSize)
         .limit(pageSize)
         .exec();
 
-      return conversations;
+      return { conversations: convos, pages: totalPages, pageNumber, pageSize };
     } catch (error) {
       console.log(error);
       return { message: 'Error getting conversations' };
@@ -118,5 +121,60 @@ module.exports = {
     let deleteCount = await Conversation.deleteMany(filter).exec();
     deleteCount.messages = await deleteMessages(filter);
     return deleteCount;
+  },
+  migrateDb: async () => {
+    try {
+      const conversations = await Conversation.find({ model: null }).exec();
+
+      if (!conversations || conversations.length === 0)
+        return { message: '[Migrate] No conversations to migrate' };
+
+      for (let convo of conversations) {
+        const messages = await getMessages({
+          conversationId: convo.conversationId,
+          messageId: { $exists: false }
+        });
+
+        let model;
+        let oldId;
+        const promises = [];
+        messages.forEach((message, i) => {
+          const msgObj = message.toObject();
+          const newId = msgObj.id;
+          if (i === 0) {
+            message.parentMessageId = '00000000-0000-0000-0000-000000000000';
+          } else {
+            message.parentMessageId = oldId;
+          }
+          
+          oldId = newId;
+          message.messageId = newId;
+          if (message.sender.toLowerCase() !== 'user' && !model) {
+            model = message.sender.toLowerCase();
+          }
+
+          if (message.sender.toLowerCase() === 'user') {
+            message.isCreatedByUser = true;
+          }
+          promises.push(message.save());
+        });
+        await Promise.all(promises);
+
+        await Conversation.findOneAndUpdate(
+          { conversationId: convo.conversationId },
+          { model },
+          { new: true }
+        ).exec();
+      }
+
+      try {
+        await mongoose.connection.db.collection('messages').dropIndex('id_1');
+      } catch (error) {
+        console.log("[Migrate] Index doesn't exist or already dropped");
+      }
+    } catch (error) {
+      console.log(error);
+      return { message: '[Migrate] Error migrating conversations' };
+    }
   }
 };
